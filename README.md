@@ -25,7 +25,7 @@ Serverless Discord Bot desplegado con AWS Lambda, DynamoDB, API Gateway y Terraf
 
 ```bash
 # Clonar repositorio
-git clone https://github.com/tu-usuario/terrabot-discord.git
+git clone https://github.com/aleadalia/terrabot-discord.git
 cd terrabot-discord
 
 # Configurar variables de entorno
