@@ -1,0 +1,20 @@
+{
+    "python.defaultInterpreterPath": "./venv/bin/python",
+    "terraform.experimentalFeatures.validateOnSave": true,
+    "aws.telemetry": false,
+    "files.associations": {
+        "*.tf": "terraform",
+        "*.tfvars": "terraform"
+    },
+    "editor.formatOnSave": true,
+    "[terraform]": {
+        "editor.defaultFormatter": "hashicorp.terraform"
+    },
+    "[python]": {
+        "editor.defaultFormatter": "ms-python.python"
+    },
+    "terraform.languageServer": {
+        "enabled": true,
+        "args": []
+    }
+}
