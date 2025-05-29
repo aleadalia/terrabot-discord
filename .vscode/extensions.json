@@ -1,0 +1,9 @@
+{
+    "recommendations": [
+        "amazonwebservices.aws-toolkit-vscode",
+        "hashicorp.terraform",
+        "ms-python.python",
+        "github.vscode-pull-request-github",
+        "eamodio.gitlens"
+    ]
+}

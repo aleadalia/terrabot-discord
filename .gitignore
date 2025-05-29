@@ -1,0 +1,25 @@
+# Secrets (NUNCA subir estos archivos)
+.env
+*.tfvars
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Python  
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# AWS
+.aws/
+
+# VS Code
+.vscode/settings.json
+
+# OS
+.DS_Store
+Thumbs.db
