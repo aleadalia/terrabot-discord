@@ -80,18 +80,22 @@ resource "aws_iam_role_policy" "lambda_policy" {
 }
 
 # Función Lambda (el cerebro del bot)
+# En tu main.tf, actualiza la sección environment del Lambda:
+
 resource "aws_lambda_function" "chatbot" {
-  filename      = "chatbot.zip"
-  function_name = "${var.project_name}-handler"
-  role          = aws_iam_role.lambda_role.arn
-  handler       = "lambda_function.lambda_handler"
-  runtime       = "python3.9"
-  timeout       = 30
+  filename         = "chatbot.zip"
+  function_name    = "${var.project_name}-handler"
+  role            = aws_iam_role.lambda_role.arn
+  handler         = "lambda_function.lambda_handler"
+  runtime         = "python3.9"
+  timeout         = 30
 
   environment {
     variables = {
-      DYNAMODB_TABLE = aws_dynamodb_table.bot_config.name
-      BOT_TOKEN      = var.bot_token
+      DYNAMODB_TABLE       = aws_dynamodb_table.bot_config.name
+      BOT_TOKEN           = var.bot_token
+      DISCORD_APP_ID      = var.discord_app_id
+      DISCORD_PUBLIC_KEY  = var.discord_public_key
     }
   }
 }

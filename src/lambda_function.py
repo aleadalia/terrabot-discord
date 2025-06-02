@@ -1,159 +1,124 @@
 import json
+import boto3
 import os
 import requests
 from datetime import datetime
-import boto3
-import logging
+import hashlib
+import hmac
 
-# Configurar logging
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-
-# Inicializar DynamoDB
 dynamodb = boto3.resource('dynamodb')
-table_name = os.environ.get('DYNAMODB_TABLE', 'terrabot-stats')
+table = dynamodb.Table(os.environ['DYNAMODB_TABLE'])
+
+# Discord API
+DISCORD_TOKEN = os.environ['BOT_TOKEN']
+DISCORD_APP_ID = os.environ.get('DISCORD_APP_ID', '')
+DISCORD_PUBLIC_KEY = os.environ.get('DISCORD_PUBLIC_KEY', '')
 
 def lambda_handler(event, context):
-    """
-    Función principal de AWS Lambda para manejar webhooks de Discord
-    """
     try:
-        # Verificar si es un ping de Discord
-        if event.get('type') == 1:
+        # Verificar si es una interacción de Discord
+        headers = event.get('headers', {})
+        body = event.get('body', '')
+        
+        # Verificar signature de Discord (opcional pero recomendado)
+        if not verify_discord_signature(headers, body):
+            print("Invalid Discord signature")
+        
+        # Parse el webhook payload
+        data = json.loads(body)
+        
+        # Manejar diferentes tipos de interacciones de Discord
+        interaction_type = data.get('type')
+        
+        if interaction_type == 1:  # PING
             return {
                 'statusCode': 200,
-                'body': json.dumps({'type': 1})
+                'body': json.dumps({'type': 1})  # PONG
             }
+        elif interaction_type == 2:  # APPLICATION_COMMAND
+            return handle_slash_command(data)
         
-        # Parsear el cuerpo del webhook
-        body = json.loads(event.get('body', '{}'))
-        
-        # Verificar si es un comando
-        if body.get('type') == 2:  # APPLICATION_COMMAND
-            return handle_slash_command(body)
-        
-        # Manejar mensajes normales (si tienes Message Content Intent)
-        if 'content' in body.get('data', {}):
-            return handle_message(body)
-            
         return {
             'statusCode': 200,
             'body': json.dumps({'message': 'OK'})
         }
         
     except Exception as e:
-        logger.error(f"Error: {str(e)}")
+        print(f"Error: {str(e)}")
         return {
             'statusCode': 500,
             'body': json.dumps({'error': str(e)})
         }
 
-def handle_slash_command(body):
-    """Manejar comandos slash de Discord"""
-    command_name = body.get('data', {}).get('name')
-    
-    if command_name == 'help':
-        response_text = """
-🤖 **TerraBot - Comandos Disponibles**
+def verify_discord_signature(headers, body):
+    # Implementar verificación de signature de Discord (opcional)
+    return True
 
-- `/help` - Muestra esta ayuda
-- `/joke` - Cuenta un chiste aleatorio  
-- `/time` - Muestra la hora actual
-- `/stats` - Estadísticas del bot
-- `/ping` - Verifica si el bot responde
-
-🔧 **Powered by AWS Lambda + Terraform**
-        """
+def handle_slash_command(data):
+    command_data = data.get('data', {})
+    command_name = command_data.get('name', '')
+    user = data.get('member', {}).get('user', {})
+    username = user.get('username', 'Usuario')
     
-    elif command_name == 'joke':
-        jokes = [
-            "¿Por qué los programadores prefieren el modo oscuro? Porque la luz atrae a los bugs! 🐛",
-            "¿Cómo se llama un algoritmo que canta? Un algo-ritmo! 🎵",
-            "¿Qué le dice un bit a otro bit? Nos vemos en el byte! 💾",
-            "¿Por qué Terraform es tan bueno organizando? Porque siempre mantiene el estado! 📊"
-        ]
-        import random
-        response_text = random.choice(jokes)
+    response_content = process_command(f"/{command_name}", username)
     
-    elif command_name == 'time':
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
-        response_text = f"🕐 **Hora actual**: {current_time}"
-    
-    elif command_name == 'stats':
-        stats = get_bot_stats()
-        response_text = f"""
-📊 **TerraBot Estadísticas**
-
-- Comandos ejecutados: {stats.get('commands_executed', 0)}
-- Tiempo activo: {stats.get('uptime', 'N/A')}
-- Región AWS: {os.environ.get('AWS_REGION', 'us-east-1')}
-- Versión: 1.0.0
-        """
-    
-    elif command_name == 'ping':
-        response_text = "🏓 ¡Pong! El bot está funcionando correctamente."
-    
-    else:
-        response_text = "❌ Comando no reconocido. Usa `/help` para ver comandos disponibles."
-    
-    # Incrementar contador de comandos
-    increment_command_counter()
+    if response_content:
+        return {
+            'statusCode': 200,
+            'body': json.dumps({
+                'type': 4,  # CHANNEL_MESSAGE_WITH_SOURCE
+                'data': {
+                    'content': response_content
+                }
+            })
+        }
     
     return {
         'statusCode': 200,
         'body': json.dumps({
-            'type': 4,  # CHANNEL_MESSAGE_WITH_SOURCE
+            'type': 4,
             'data': {
-                'content': response_text
+                'content': 'Comando no reconocido'
             }
         })
     }
 
-def handle_message(body):
-    """Manejar mensajes de texto normales"""
-    content = body.get('data', {}).get('content', '').lower()
+def process_command(command, username):
+    cmd = command.lower().split()
     
-    if content.startswith('!'):
-        # Comando con prefijo !
-        command = content[1:].split()[0]
-        
-        if command == 'help':
-            response = "🤖 Usa comandos slash: `/help`, `/joke`, `/time`, `/stats`, `/ping`"
-        else:
-            response = f"❌ Comando `!{command}` no reconocido. Usa `/help`"
-        
-        # En un bot real, aquí enviarías la respuesta de vuelta a Discord
-        # Por ahora solo logueamos
-        logger.info(f"Comando recibido: {command}")
+    if cmd[0] == '/help':
+        return """**Comandos disponibles:**
+• `/help` - Muestra esta ayuda
+• `/joke` - Cuenta un chiste
+• `/time` - Muestra la hora actual
+• `/stats` - Estadísticas del bot
+• `/ping` - Verifica conectividad"""
     
-    return {
-        'statusCode': 200,
-        'body': json.dumps({'message': 'Message processed'})
-    }
-
-def get_bot_stats():
-    """Obtener estadísticas del bot desde DynamoDB"""
-    try:
-        table = dynamodb.Table(table_name)
-        response = table.get_item(Key={'stat_name': 'commands_executed'})
-        
-        return {
-            'commands_executed': response.get('Item', {}).get('count', 0),
-            'uptime': 'Available since deployment'
-        }
-    except Exception as e:
-        logger.error(f"Error getting stats: {str(e)}")
-        return {'commands_executed': 0, 'uptime': 'N/A'}
-
-def increment_command_counter():
-    """Incrementar contador de comandos en DynamoDB"""
-    try:
-        table = dynamodb.Table(table_name)
-        table.update_item(
-            Key={'stat_name': 'commands_executed'},
-            UpdateExpression='ADD #count :inc',
-            ExpressionAttributeNames={'#count': 'count'},
-            ExpressionAttributeValues={':inc': 1}
-        )
-    except Exception as e:
-        logger.error(f"Error incrementing counter: {str(e)}")
+    elif cmd[0] == '/joke':
+        jokes = [
+            "¿Por qué los programadores prefieren el modo oscuro? Porque la luz atrae bugs! 🐛",
+            "¿Cuál es la diferencia entre HTML y HTML5? Unos 4 años de universidad 😅",
+            "¿Por qué los desarrolladores odian la naturaleza? Tiene demasiados bugs 🌲🐛",
+            "¿Cómo llamas a un algoritmo que no funciona? Un algo-ritmo! 🎵"
+        ]
+        import random
+        return random.choice(jokes)
+    
+    elif cmd[0] == '/time':
+        return f"⏰ Hora actual: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}"
+    
+    elif cmd[0] == '/ping':
+        return "🏓 Pong! Bot funcionando correctamente ✅"
+    
+    elif cmd[0] == '/stats':
+        try:
+            response = table.get_item(Key={'id': 'stats'})
+            stats = response.get('Item', {'commands': 0})
+            stats['commands'] = stats.get('commands', 0) + 1
+            table.put_item(Item={'id': 'stats', 'commands': stats['commands']})
+            return f"📊 Comandos procesados: {stats['commands']}"
+        except Exception as e:
+            print(f"DynamoDB error: {e}")
+            return "📊 Estadísticas no disponibles temporalmente"
+    
+    return None
