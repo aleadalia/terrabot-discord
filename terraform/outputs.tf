@@ -12,3 +12,8 @@ output "dynamodb_table_name" {
   description = "Name of the DynamoDB table"
   value       = aws_dynamodb_table.bot_config.name
 }
+
+output "api_gateway_id" {
+  description = "API Gateway ID"
+  value       = aws_api_gateway_rest_api.chatbot_api.id
+}

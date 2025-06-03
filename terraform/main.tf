@@ -1,4 +1,3 @@
-# Configuración de Terraform y providers
 terraform {
   required_providers {
     aws = {
@@ -8,20 +7,19 @@ terraform {
   }
 }
 
-# Configuración del provider AWS
 provider "aws" {
   region = var.aws_region
 }
 
-# DynamoDB para almacenar configuraciones del bot
+# DynamoDB para configuraciones
 resource "aws_dynamodb_table" "bot_config" {
-  name           = "${var.project_name}-config"
-  billing_mode   = "PAY_PER_REQUEST"  # Solo pagas por lo que uses
-  hash_key       = "id"
+  name         = "${var.project_name}-config"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "id"
 
   attribute {
     name = "id"
-    type = "S"  # String
+    type = "S"
   }
 
   tags = {
@@ -29,7 +27,7 @@ resource "aws_dynamodb_table" "bot_config" {
   }
 }
 
-# Rol IAM para que Lambda pueda ejecutarse
+# IAM Role para Lambda
 resource "aws_iam_role" "lambda_role" {
   name = "${var.project_name}-lambda-role"
 
@@ -47,7 +45,7 @@ resource "aws_iam_role" "lambda_role" {
   })
 }
 
-# Políticas de permisos para Lambda
+# Política para Lambda
 resource "aws_iam_role_policy" "lambda_policy" {
   name = "${var.project_name}-lambda-policy"
   role = aws_iam_role.lambda_role.id
@@ -79,41 +77,42 @@ resource "aws_iam_role_policy" "lambda_policy" {
   })
 }
 
-# Función Lambda (el cerebro del bot)
-# En tu main.tf, actualiza la sección environment del Lambda:
+# Lambda Function
+data "archive_file" "lambda_zip" {
+  type        = "zip"
+  source_dir  = "${path.module}/../src"
+  output_path = "${path.module}/chatbot.zip"
+}
 
 resource "aws_lambda_function" "chatbot" {
-  filename         = "chatbot.zip"
+  filename         = data.archive_file.lambda_zip.output_path
   function_name    = "${var.project_name}-handler"
   role            = aws_iam_role.lambda_role.arn
   handler         = "lambda_function.lambda_handler"
   runtime         = "python3.9"
   timeout         = 30
+  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
 
   environment {
     variables = {
-      DYNAMODB_TABLE       = aws_dynamodb_table.bot_config.name
-      BOT_TOKEN           = var.bot_token
-      DISCORD_APP_ID      = var.discord_app_id
-      DISCORD_PUBLIC_KEY  = var.discord_public_key
+      DYNAMODB_TABLE = aws_dynamodb_table.bot_config.name
+      BOT_TOKEN     = var.bot_token
     }
   }
 }
 
-# API Gateway - punto de entrada HTTP
+# API Gateway
 resource "aws_api_gateway_rest_api" "chatbot_api" {
   name        = "${var.project_name}-api"
-  description = "API Gateway for Discord/Slack bot"
+  description = "API Gateway for Discord bot"
 }
 
-# Recurso /webhook en la API
 resource "aws_api_gateway_resource" "webhook" {
   rest_api_id = aws_api_gateway_rest_api.chatbot_api.id
   parent_id   = aws_api_gateway_rest_api.chatbot_api.root_resource_id
   path_part   = "webhook"
 }
 
-# Método POST para el webhook
 resource "aws_api_gateway_method" "webhook_post" {
   rest_api_id   = aws_api_gateway_rest_api.chatbot_api.id
   resource_id   = aws_api_gateway_resource.webhook.id
@@ -121,26 +120,74 @@ resource "aws_api_gateway_method" "webhook_post" {
   authorization = "NONE"
 }
 
-# Integración entre API Gateway y Lambda
-resource "aws_api_gateway_integration" "lambda_integration" {
-  rest_api_id = aws_api_gateway_rest_api.chatbot_api.id
-  resource_id = aws_api_gateway_resource.webhook.id
-  http_method = aws_api_gateway_method.webhook_post.http_method
-
-  integration_http_method = "POST"
-  type                   = "AWS_PROXY"
-  uri                    = aws_lambda_function.chatbot.invoke_arn
+# Agregar método OPTIONS para CORS
+resource "aws_api_gateway_method" "webhook_options" {
+  rest_api_id   = aws_api_gateway_rest_api.chatbot_api.id
+  resource_id   = aws_api_gateway_resource.webhook.id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
 }
 
-# Despliegue de la API
+resource "aws_api_gateway_integration" "lambda_integration" {
+  rest_api_id             = aws_api_gateway_rest_api.chatbot_api.id
+  resource_id             = aws_api_gateway_resource.webhook.id
+  http_method             = aws_api_gateway_method.webhook_post.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.chatbot.invoke_arn
+}
+
+# Integración para OPTIONS (CORS)
+resource "aws_api_gateway_integration" "webhook_options_integration" {
+  rest_api_id = aws_api_gateway_rest_api.chatbot_api.id
+  resource_id = aws_api_gateway_resource.webhook.id
+  http_method = aws_api_gateway_method.webhook_options.http_method
+  type        = "MOCK"
+
+  request_templates = {
+    "application/json" = jsonencode({
+      statusCode = 200
+    })
+  }
+}
+
+# Response para OPTIONS
+resource "aws_api_gateway_method_response" "webhook_options_response" {
+  rest_api_id = aws_api_gateway_rest_api.chatbot_api.id
+  resource_id = aws_api_gateway_resource.webhook.id
+  http_method = aws_api_gateway_method.webhook_options.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+    "method.response.header.Access-Control-Allow-Origin"  = true
+  }
+}
+
+resource "aws_api_gateway_integration_response" "webhook_options_integration_response" {
+  rest_api_id = aws_api_gateway_rest_api.chatbot_api.id
+  resource_id = aws_api_gateway_resource.webhook.id
+  http_method = aws_api_gateway_method.webhook_options.http_method
+  status_code = aws_api_gateway_method_response.webhook_options_response.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+    "method.response.header.Access-Control-Allow-Methods" = "'POST,OPTIONS'"
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+  }
+}
+
 resource "aws_api_gateway_deployment" "chatbot_deployment" {
-  depends_on = [aws_api_gateway_integration.lambda_integration]
+  depends_on = [
+    aws_api_gateway_integration.lambda_integration,
+    aws_api_gateway_integration.webhook_options_integration
+  ]
 
   rest_api_id = aws_api_gateway_rest_api.chatbot_api.id
   stage_name  = "prod"
 }
 
-# Permiso para que API Gateway invoque Lambda
 resource "aws_lambda_permission" "api_gateway" {
   statement_id  = "AllowAPIGatewayInvoke"
   action        = "lambda:InvokeFunction"
